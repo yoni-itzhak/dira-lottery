@@ -57,7 +57,11 @@ table.mini tr.profit td { color: var(--green); }
 .plan-placeholder { margin-top: 18px; border: 2px dashed var(--line); border-radius: 10px; padding: 26px; text-align: center; color: #98a4b1; font-size: .85rem; }
 
 footer { margin-top: 14px; font-size: .74rem; color: #8a97a5; text-align: center; line-height: 1.5; }
-.plan-img { width: 100%; border: 1px solid var(--line); border-radius: 8px; margin-top: 4px; }
+.plan-img { width: 100%; border: 1px solid var(--line); border-radius: 8px; margin-top: 4px; cursor: zoom-in; }
+.plan-lightbox { position: fixed; inset: 0; background: rgba(10, 15, 25, .85); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; }
+.plan-lightbox img { max-width: 100%; max-height: 100%; border-radius: 6px; box-shadow: 0 4px 40px rgba(0,0,0,.5); cursor: default; }
+.plan-lightbox .close { position: fixed; top: 16px; left: 16px; border: none; background: rgba(255,255,255,.15); color: #fff; border-radius: 50%; width: 36px; height: 36px; font-size: 1rem; cursor: pointer; }
+.plan-lightbox .close:hover { background: rgba(255,255,255,.28); }
 .review { background: #f6f8fb; border-radius: 10px; padding: 12px 14px; margin-top: 8px; }
 .review .score { background: var(--blue); color: #fff; border-radius: 14px; padding: 2px 10px; font-size: .85rem; margin-inline-start: 8px; }
 .rv-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: .8rem; margin-top: 8px; }

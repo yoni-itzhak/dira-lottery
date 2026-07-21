@@ -346,15 +346,38 @@ function Detail({ apt, a, onClose }) {
 
         <Review apt={apt} />
         <h3>תכנית הדירה</h3>
-        <a href={`${import.meta.env.BASE_URL}plans/apt_b${apt.b}_${apt.apt}.png`} target="_blank" rel="noreferrer">
-          <img className="plan-img"
-               src={`${import.meta.env.BASE_URL}plans/apt_b${apt.b}_${apt.apt}.png`}
-               alt={`תכנית דירה ${apt.apt} בניין ${apt.b}`}
-               onError={(e) => { e.target.closest('a').style.display = 'none'; }} />
-        </a>
-        <div className="note">מקור: תכניות המכר (DWFX) · לחיצה פותחת בגודל מלא · בקומות 2-3 מוצגת תכנית הקומה הטיפוסית המשותפת</div>
+        <PlanImage apt={apt} />
+        <div className="note">מקור: תכניות המכר (DWFX) · לחיצה מגדילה · בקומות 2-3 מוצגת תכנית הקומה הטיפוסית המשותפת</div>
       </div>
     </div>
+  );
+}
+
+function PlanImage({ apt }) {
+  const [zoomed, setZoomed] = useState(false);
+  const src = `${import.meta.env.BASE_URL}plans/apt_b${apt.b}_${apt.apt}.png`;
+
+  useEffect(() => {
+    if (!zoomed) return;
+    const onKey = (e) => { if (e.key === 'Escape') setZoomed(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomed]);
+
+  return (
+    <>
+      <img className="plan-img" src={src}
+           alt={`תכנית דירה ${apt.apt} בניין ${apt.b}`}
+           onClick={() => setZoomed(true)}
+           onError={(e) => { e.target.style.display = 'none'; }} />
+      {zoomed && (
+        <div className="plan-lightbox" onClick={() => setZoomed(false)}>
+          <button className="close" onClick={() => setZoomed(false)}>✕</button>
+          <img src={src} alt={`תכנית דירה ${apt.apt} בניין ${apt.b}`}
+               onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
+    </>
   );
 }
 
