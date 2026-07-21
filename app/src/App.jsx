@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { APARTMENTS } from './data.js';
+import { getReview, floorNote } from './reviews.js';
 
 // ---- payment schedule (user's terms): 7% at signing, 13% after 1.5m, then 10% every 4.5m ----
 const SIGN_DATE = new Date(2026, 8, 1); // Sep 1, 2026
@@ -102,7 +103,7 @@ export default function App() {
   const takenSet = useMemo(() => new Set(taken), [taken]);
 
   const rows = useMemo(() => {
-    let list = APARTMENTS.filter((x) => showAll || x.prog).map((apt) => ({ ...apt, ...priceModel(apt, a), id: `${apt.b}-${apt.apt}` }));
+    let list = APARTMENTS.filter((x) => showAll || x.prog).map((apt) => ({ ...apt, ...priceModel(apt, a), id: `${apt.b}-${apt.apt}`, design: getReview(apt)?.score ?? null }));
     const progRanked = [...list].filter((r) => r.prog).sort((x, y) => y.profit - x.profit);
     const rankMap = new Map(progRanked.map((r, i) => [r.id, i + 1]));
     list.forEach((r) => { r.rank = rankMap.get(r.id) ?? null; });
@@ -234,6 +235,7 @@ export default function App() {
                 {th('totalCost', 'עלות כוללת')}
                 {th('marketValue', 'שווי שוק')}
                 {th('profit', 'רווח')}
+                {th('design', 'תכנון')}
               </tr>
             </thead>
             <tbody>
@@ -259,6 +261,7 @@ export default function App() {
                   <td>{r.prog ? nis(r.totalCost) : '—'}</td>
                   <td>{nis(r.marketValue)}</td>
                   <td className={r.prog ? 'profit' : ''}>{r.prog ? nis(r.profit) : '—'}</td>
+                  <td className='design'>{r.design ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -337,6 +340,7 @@ function Detail({ apt, a, onClose }) {
           </>
         )}
 
+        <Review apt={apt} />
         <h3>תכנית הדירה</h3>
         <a href={`${import.meta.env.BASE_URL}plans/apt_b${apt.b}_${apt.apt}.png`} target="_blank" rel="noreferrer">
           <img className="plan-img"
@@ -346,6 +350,31 @@ function Detail({ apt, a, onClose }) {
         </a>
         <div className="note">מקור: תכניות המכר (DWFX) · לחיצה פותחת בגודל מלא · בקומות 2-3 מוצגת תכנית הקומה הטיפוסית המשותפת</div>
       </div>
+    </div>
+  );
+}
+
+function Review({ apt }) {
+  const rv = getReview(apt);
+  if (!rv) return null;
+  const notes = floorNote(apt);
+  return (
+    <div className="review">
+      <h3>ביקורת תכנון <span className="score">{rv.score}/10</span></h3>
+      <div className="rv-cols">
+        <div>
+          <b>יתרונות</b>
+          <ul>{rv.pros.map((p, i) => <li key={i}>{p}</li>)}</ul>
+        </div>
+        <div>
+          <b>חסרונות</b>
+          <ul className="cons">{rv.cons.map((c, i) => <li key={i}>{c}</li>)}</ul>
+        </div>
+      </div>
+      <div className="rv-bottom">{rv.bottom}</div>
+      {notes.length > 0 && (
+        <div className="rv-notes">{notes.map((n, i) => <div key={i}>• {n}</div>)}</div>
+      )}
     </div>
   );
 }
