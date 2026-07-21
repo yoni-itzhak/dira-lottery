@@ -24,6 +24,7 @@ const DEFAULTS = {
   parkPartial: 0.02,
   smallBalconyPenalty: 0.015, // balcony < 10m²
   yardBonus: 0.03,
+  designWeight: 0.02,     // market-value effect per design-score point vs 7.5 baseline
 };
 
 const LABELS = {
@@ -40,8 +41,9 @@ const LABELS = {
   parkPartial: 'בונוס נוף לפארק (חלקי)',
   smallBalconyPenalty: 'קנס מרפסת קטנה (<10 מ"ר)',
   yardBonus: 'בונוס חצר (דירת גן)',
+  designWeight: 'השפעת ציון תכנון על שווי (לנק׳)',
 };
-const PCT_KEYS = new Set(['balconyCoef','vat','discountRate','indexAnnual','marketBalconyCoef','floorPremiumPct','parkBonus','parkPartial','smallBalconyPenalty','yardBonus']);
+const PCT_KEYS = new Set(['balconyCoef','vat','discountRate','indexAnnual','marketBalconyCoef','floorPremiumPct','parkBonus','parkPartial','smallBalconyPenalty','yardBonus','designWeight']);
 
 const nis = (v) => '₪' + Math.round(v).toLocaleString('he-IL');
 const fmtDate = (d) => d.toLocaleDateString('he-IL', { month: '2-digit', year: 'numeric' });
@@ -73,6 +75,8 @@ export function priceModel(apt, a) {
   else if (apt.park === 'partial') marketMult *= 1 + a.parkPartial;
   if (apt.bal > 0 && apt.bal < 10) marketMult *= 1 - a.smallBalconyPenalty;
   if (apt.yard) marketMult *= 1 + a.yardBonus;
+  const design = getReview(apt)?.score;
+  if (design != null) marketMult *= 1 + a.designWeight * (design - 7.5);
   const marketValue = a.marketPerM2 * (apt.area + a.marketBalconyCoef * apt.bal) * marketMult;
 
   return { pricingArea, priceExVat, priceIncVat, discount, netPrice, idxFactor, totalCost, marketValue, profit: marketValue - totalCost };
