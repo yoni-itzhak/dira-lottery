@@ -337,7 +337,14 @@ function Detail({ apt, a, onClose }) {
           </>
         )}
 
-        <div className="plan-placeholder">תכנית הדירה תתווסף כאן (שלב הבא)</div>
+        <h3>תכנית הדירה</h3>
+        <a href={`${import.meta.env.BASE_URL}plans/apt_b${apt.b}_${apt.apt}.png`} target="_blank" rel="noreferrer">
+          <img className="plan-img"
+               src={`${import.meta.env.BASE_URL}plans/apt_b${apt.b}_${apt.apt}.png`}
+               alt={`תכנית דירה ${apt.apt} בניין ${apt.b}`}
+               onError={(e) => { e.target.closest('a').style.display = 'none'; }} />
+        </a>
+        <div className="note">מקור: תכניות המכר (DWFX) · לחיצה פותחת בגודל מלא · בקומות 2-3 מוצגת תכנית הקומה הטיפוסית המשותפת</div>
       </div>
     </div>
   );
