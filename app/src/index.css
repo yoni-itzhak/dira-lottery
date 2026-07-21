@@ -47,6 +47,11 @@ td.profit { color: var(--green); font-weight: 700; }
 .drawer h2 { color: var(--blue); margin-bottom: 12px; }
 .drawer h3 { color: var(--blue); font-size: .95rem; margin: 16px 0 6px; }
 .close { float: left; border: none; background: #eee; border-radius: 50%; width: 30px; height: 30px; cursor: pointer; }
+.drawer-nav { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.drawer-nav button { border: 1px solid var(--line); background: #f6f8fb; border-radius: 6px; padding: 5px 12px; font-size: .82rem; cursor: pointer; }
+.drawer-nav button:hover:not(:disabled) { background: #e8eef5; }
+.drawer-nav button:disabled { opacity: .35; cursor: default; }
+.drawer-nav-pos { font-size: .76rem; color: #5a6b7d; white-space: nowrap; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .grid > div { background: #f6f8fb; border-radius: 8px; padding: 8px; font-size: .8rem; }
 .grid span { color: #5a6b7d; display: block; margin-bottom: 2px; }

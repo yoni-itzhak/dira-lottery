@@ -273,7 +273,15 @@ export default function App() {
         </main>
       </div>
 
-      {detail && <Detail apt={detail} a={a} onClose={() => setDetail(null)} />}
+      {detail && (
+        <Detail
+          apt={rows.find((r) => r.id === detail.id) ?? detail}
+          rows={rows}
+          a={a}
+          onClose={() => setDetail(null)}
+          onNavigate={setDetail}
+        />
+      )}
 
       <footer>
         הנתונים חולצו אוטומטית מתכניות המכר (DWFX). מחירי השוק והמדד הם הערכות —
@@ -283,7 +291,21 @@ export default function App() {
   );
 }
 
-function Detail({ apt, a, onClose }) {
+function Detail({ apt, rows, a, onClose, onNavigate }) {
+  const idx = rows.findIndex((r) => r.id === apt.id);
+  const prev = idx > 0 ? rows[idx - 1] : null;
+  const next = idx >= 0 && idx < rows.length - 1 ? rows[idx + 1] : null;
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      if (e.key === 'ArrowUp' && prev) { e.preventDefault(); onNavigate(prev); }
+      else if (e.key === 'ArrowDown' && next) { e.preventDefault(); onNavigate(next); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [prev, next, onNavigate]);
+
   const m = priceModel(apt, a);
   let paid = 0;
   const sched = SCHEDULE.map((p) => {
@@ -297,6 +319,11 @@ function Detail({ apt, a, onClose }) {
     <div className="overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
         <button className="close" onClick={onClose}>✕</button>
+        <div className="drawer-nav">
+          <button disabled={!prev} onClick={() => prev && onNavigate(prev)}>▲ הקודמת</button>
+          <span className="drawer-nav-pos">{idx + 1} מתוך {rows.length}</span>
+          <button disabled={!next} onClick={() => next && onNavigate(next)}>הבאה ▼</button>
+        </div>
         <h2>בניין {apt.b} · דירה {apt.apt} {apt.prog ? '· מחיר מטרה' : '· שוק חופשי'}</h2>
         <div className="grid">
           <div><span>קומה</span><b>{apt.floor === 0 ? 'קרקע' : apt.floor}</b></div>
