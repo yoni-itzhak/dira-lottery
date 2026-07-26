@@ -1,0 +1,61 @@
+name: Install final unit research
+
+on:
+  pull_request:
+    branches:
+      - claude/session-dcup8f
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: analysis/deep-apartment-review
+      - name: Restore truncated payload bytes
+        run: |
+          test "$(wc -c < .research_payload_v2/chunk-01)" -eq 11999
+          test "$(wc -c < .research_payload_v2/chunk-02)" -eq 11999
+          printf 'e' >> .research_payload_v2/chunk-01
+          printf 'w' >> .research_payload_v2/chunk-02
+          echo 'f606ee901aeab170f78d9078270fb935d38c9e66f288cc39e700ac6dd4094fba  .research_payload_v2/chunk-00' | sha256sum -c -
+          echo '44358e9164bd3d350ff1e56f47ae641dde7b157ee6baafbde6899647fc2b2f5d  .research_payload_v2/chunk-01' | sha256sum -c -
+          echo 'e89eaa1b83f44ed64d17ee8ed7d70cc1ad09ece8a14910d251996b5ab4bb8658  .research_payload_v2/chunk-02' | sha256sum -c -
+          echo '8eb18570071865cb0117b69a62f9c39d3ada178f36faf9fa9744b7e6cf844fdd  .research_payload_v2/chunk-03' | sha256sum -c -
+      - name: Decode and install research
+        run: |
+          cat .research_payload_v2/chunk-* > /tmp/final-unit-research.b64
+          echo '876b07a59f072790d2da57c5f5bb5f87116f732d39d08ea0bcef2097e3d32b63  /tmp/final-unit-research.b64' | sha256sum -c -
+          base64 -d /tmp/final-unit-research.b64 > /tmp/final-unit-research.tar.xz
+          echo 'a761861e9a7a31830c7a9e406b00e8b0cc2211037adcc11fe4218ba4366be647  /tmp/final-unit-research.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/final-unit-research.tar.xz -C .
+          rm -rf .research_payload_v2
+          rm -f analysis/payload_diagnostics.txt
+          rm -f .github/workflows/install-final-unit-research.yml
+      - name: Validate installed files
+        run: |
+          test -s analysis/apartment_unit_analysis_v2.json
+          test -s analysis/apartment_unit_analysis_v2.csv
+          test -s analysis/unit_location_methodology_he.md
+          test -s analysis/building_1_unit_reviews_he.md
+          test -s analysis/building_2_unit_reviews_he.md
+          test -s analysis/building_3_unit_reviews_he.md
+          python - <<'PY'
+          import json, csv
+          with open('analysis/apartment_unit_analysis_v2.json', encoding='utf-8') as f:
+              data = json.load(f)
+          assert len(data['units']) == 84
+          assert len({(u['building'], u['apartment']) for u in data['units']}) == 84
+          with open('analysis/apartment_unit_analysis_v2.csv', encoding='utf-8-sig') as f:
+              assert sum(1 for _ in csv.DictReader(f)) == 84
+          PY
+      - name: Commit research files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add complete unit location research"
+          git push origin HEAD:analysis/deep-apartment-review
