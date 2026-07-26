@@ -1,0 +1,18 @@
+chunk sizes:
+12000 .research_payload_v2/chunk-00
+11999 .research_payload_v2/chunk-01
+11999 .research_payload_v2/chunk-02
+ 1656 .research_payload_v2/chunk-03
+37654 total
+chunk hashes:
+f606ee901aeab170f78d9078270fb935d38c9e66f288cc39e700ac6dd4094fba  .research_payload_v2/chunk-00
+c8890b6c495abfc4715a49a727c1559cc8f509af7e1039f6ff7503ee349a81d0  .research_payload_v2/chunk-01
+8ae2c4fe04096334836422db88620eed0280c743c31ba6de188e15b2cdbac1b0  .research_payload_v2/chunk-02
+8eb18570071865cb0117b69a62f9c39d3ada178f36faf9fa9744b7e6cf844fdd  .research_payload_v2/chunk-03
+combined base64:
+37654 /tmp/final-unit-research.b64
+3140984367164252da93968771fb15fea65e53889eed6292804b4eb42ef87787  /tmp/final-unit-research.b64
+decoded tar:
+28239 /tmp/final-unit-research.tar.xz
+47043fc9eadc2a922292e2898e9ac363922a4c120d6091bcbad645bc9e366a51  /tmp/final-unit-research.tar.xz
+xz-valid=no
