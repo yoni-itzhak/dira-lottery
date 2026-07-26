@@ -13,13 +13,23 @@ permissions:
 
 jobs:
   install:
-    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[profit model installed]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/profit-model-v2
-      - name: Assemble payload
+
+      - name: Check whether installation is needed
+        id: check
+        run: |
+          if [ -d .profit_model_payload ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assemble and verify payload
+        if: steps.check.outputs.needed == 'true'
         run: |
           cat \
             .profit_model_payload/chunk-00 \
@@ -30,26 +40,28 @@ jobs:
             .profit_model_payload/chunk-05 \
             .profit_model_payload/chunk-06x-* \
             > assembled-profit-model.b64
-          sha256sum assembled-profit-model.b64 > assembled-profit-model.sha256
-      - uses: actions/upload-artifact@v4
-        with:
-          name: assembled-profit-model
-          path: |
-            assembled-profit-model.b64
-            assembled-profit-model.sha256
-          retention-days: 1
-      - name: Decode and verify payload
-        run: |
           base64 -d assembled-profit-model.b64 > /tmp/profit-model.tar.gz
           echo 'de623e2cdac24dd0114ee15d04456f4b0af27a75cdefc1293fb62e94378040f2  /tmp/profit-model.tar.gz' | sha256sum -c -
           tar -tzf /tmp/profit-model.tar.gz > /tmp/profit-model-manifest.txt
           test -s /tmp/profit-model-manifest.txt
+
       - name: Install model
+        if: steps.check.outputs.needed == 'true'
         run: |
           tar -xzf /tmp/profit-model.tar.gz -C .
           rm -rf .profit_model_payload
-          rm -f .github/workflows/install-profit-model-v2.yml
+          rm -f .github/workflows/validate-app.yml
+          rm -f assembled-profit-model.b64 assembled-profit-model.sha256
+
+      - name: Build app
+        if: steps.check.outputs.needed == 'true'
+        working-directory: app
+        run: |
+          npm ci
+          npm run build
+
       - name: Commit model
+        if: steps.check.outputs.needed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
