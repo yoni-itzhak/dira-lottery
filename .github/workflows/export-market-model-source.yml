@@ -1,0 +1,26 @@
+name: Export market model source
+
+on:
+  pull_request:
+    branches:
+      - claude/session-dcup8f
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package app and research
+        run: |
+          mkdir -p export_bundle
+          cp -R app export_bundle/app
+          cp -R analysis/final-apartment-research export_bundle/final-apartment-research
+      - name: Upload source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-model-source
+          path: export_bundle
+          retention-days: 2
