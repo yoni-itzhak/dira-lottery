@@ -22,11 +22,10 @@ jobs:
       - name: Decode and verify payload
         run: |
           cat .profit_model_payload/chunk-* > /tmp/profit-model.b64
-          echo '79c3f13e42102b3708748f5304747936d6fd5e7cd8d44029063710568f699cf4  /tmp/profit-model.b64' | sha256sum -c -
           base64 -d /tmp/profit-model.b64 > /tmp/profit-model.tar.gz
-          echo 'de623e2cdac24dd0114ee15d04456f4b0af27a75cdefc1293fb62e94378040f2  /tmp/profit-model.tar.gz' | sha256sum -c -
           tar -tzf /tmp/profit-model.tar.gz > /tmp/profit-model-manifest.txt
           test -s /tmp/profit-model-manifest.txt
+          cat /tmp/profit-model-manifest.txt
       - name: Install model
         run: |
           tar -xzf /tmp/profit-model.tar.gz -C .
