@@ -1,0 +1,42 @@
+{
+  "calibration_date": "2026-07-26",
+  "sale_date": "2030-05-01",
+  "segment_rates_ils_per_effective_m2": {
+    "3 חדרים קומפקטית": 28500,
+    "3 חדרים גדולה": 28000,
+    "4 חדרים": 27500,
+    "דירת גן 3 חדרים": 28500
+  },
+  "balcony_market_coefficients": {
+    "1A": 0.3,
+    "1B": 0.32,
+    "1C": 0.55,
+    "1D": 0.5,
+    "1E": 0.5,
+    "2A": 0.32,
+    "2B": 0.3,
+    "2C": 0.55,
+    "2D": 0.5,
+    "2E": 0.55,
+    "3A": 0.55,
+    "3B": 0.36,
+    "3C": 0.36,
+    "3D": 0.55,
+    "3E": 0.4,
+    "3G-1": 0,
+    "3G-2": 0
+  },
+  "garden_premiums_ils": {
+    "3G-1": 250000,
+    "3G-2": 120000
+  },
+  "annual_growth_scenarios": {
+    "low": -0.01,
+    "base": 0.015,
+    "high": 0.04
+  },
+  "market_calibration_range": 0.05,
+  "construction_index_annual": 0.03,
+  "indexed_share_after_first_20_pct": 0.5,
+  "notes": "Conservative decision model; not a signed appraisal."
+}

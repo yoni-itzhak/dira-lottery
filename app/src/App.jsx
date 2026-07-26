@@ -1,139 +1,163 @@
 import { useEffect, useMemo, useState } from 'react';
 import { APARTMENTS } from './data.js';
-import { getReview, floorNote } from './reviews.js';
+import RESEARCH from './apartmentResearch.json';
+import {
+  CALIBRATION_DATE,
+  DEFAULT_SALE_DATE,
+  MARKET_DEFAULTS,
+  MARKET_LABELS,
+  PERCENT_KEYS,
+  fullModel,
+  nis,
+  pct,
+} from './marketModel.js';
 
-// ---- payment schedule (user's terms): 7% at signing, 13% after 1.5m, then 10% every 4.5m ----
-const SIGN_DATE = new Date(2026, 8, 1); // Sep 1, 2026
-const SCHEDULE = [
-  { pct: 0.07, months: 0 },
-  { pct: 0.13, months: 1.5 },
-  ...Array.from({ length: 8 }, (_, i) => ({ pct: 0.10, months: 1.5 + 4.5 * (i + 1) })),
+const RESEARCH_BY_ID = new Map(RESEARCH.units.map((unit) => [unit.apartment_id, unit]));
+const DIR_HE = { full: 'מלא', partial: 'חלקי', '': 'לא' };
+const fmtDate = (date) => date.toLocaleDateString('he-IL', { month: '2-digit', year: 'numeric' });
+const fmtFullDate = (date) => date.toLocaleDateString('he-IL');
+
+const ASSUMPTION_GROUPS = [
+  {
+    title: 'מחיר הרכישה',
+    keys: ['pricePerM2', 'balconyCoef', 'vat', 'discountRate', 'discountCap'],
+  },
+  {
+    title: 'מדד תשומות הבנייה',
+    keys: ['indexAnnual', 'indexedShareAfterFirst20'],
+  },
+  {
+    title: 'שווי שוק כיום',
+    keys: ['compact3Rate', 'large3Rate', 'fourRoomRate', 'garden1Premium', 'garden2Premium'],
+  },
+  {
+    title: 'תרחישים עד המכירה',
+    keys: ['downsideGrowthAnnual', 'baseGrowthAnnual', 'upsideGrowthAnnual', 'marketCalibrationRange'],
+  },
 ];
 
-const DEFAULTS = {
-  pricePerM2: 15022,      // ₪/m² before VAT (tender)
-  balconyCoef: 0.30,      // balcony weight in contract pricing
-  vat: 0.18,
-  discountRate: 0.20,
-  discountCap: 300000,
-  indexAnnual: 0.03,      // מדד תשומות הבנייה, annual assumption
-  marketPerM2: 24000,     // ₪/m² incl. VAT at sale — UPDATE from real data
-  marketBalconyCoef: 0.5,
-  floorPremiumPct: 0.008, // market premium per floor
-  parkBonus: 0.05,        // full park view bonus on market value
-  parkPartial: 0.02,
-  smallBalconyPenalty: 0.015, // balcony < 10m²
-  yardBonus: 0.03,
-  designWeight: 0.02,     // market-value effect per design-score point vs 7.5 baseline
-};
-
-const LABELS = {
-  pricePerM2: 'מחיר למ"ר לפני מע"מ (מכרז)',
-  balconyCoef: 'מקדם מרפסת בחוזה',
-  vat: 'מע"מ',
-  discountRate: 'שיעור הנחה',
-  discountCap: 'תקרת הנחה (₪)',
-  indexAnnual: 'מדד תשומות בנייה שנתי',
-  marketPerM2: 'מחיר שוק למ"ר (כולל מע"מ)',
-  marketBalconyCoef: 'מקדם מרפסת בשווי שוק',
-  floorPremiumPct: 'פרמיית קומה (לשוק, לקומה)',
-  parkBonus: 'בונוס נוף לפארק (מלא)',
-  parkPartial: 'בונוס נוף לפארק (חלקי)',
-  smallBalconyPenalty: 'קנס מרפסת קטנה (<10 מ"ר)',
-  yardBonus: 'בונוס חצר (דירת גן)',
-  designWeight: 'השפעת ציון תכנון על שווי (לנק׳)',
-};
-const PCT_KEYS = new Set(['balconyCoef','vat','discountRate','indexAnnual','marketBalconyCoef','floorPremiumPct','parkBonus','parkPartial','smallBalconyPenalty','yardBonus','designWeight']);
-
-const nis = (v) => '₪' + Math.round(v).toLocaleString('he-IL');
-const fmtDate = (d) => d.toLocaleDateString('he-IL', { month: '2-digit', year: 'numeric' });
-
-function addMonths(date, m) {
-  const d = new Date(date);
-  const whole = Math.floor(m);
-  d.setMonth(d.getMonth() + whole);
-  d.setDate(d.getDate() + Math.round((m - whole) * 30));
-  return d;
-}
-
-// indexation multiplier for total contract: Σ pct·(1+idx)^(months/12)
-function indexFactor(a) {
-  return SCHEDULE.reduce((s, p) => s + p.pct * Math.pow(1 + a.indexAnnual, p.months / 12), 0);
-}
-
-export function priceModel(apt, a) {
-  const pricingArea = apt.area + a.balconyCoef * apt.bal;
-  const priceExVat = pricingArea * a.pricePerM2;
-  const priceIncVat = priceExVat * (1 + a.vat);
-  const discount = Math.min(a.discountRate * priceIncVat, a.discountCap);
-  const netPrice = priceIncVat - discount;
-  const idxFactor = indexFactor(a);
-  const totalCost = netPrice * idxFactor;
-
-  let marketMult = 1 + a.floorPremiumPct * apt.floor;
-  if (apt.park === 'full') marketMult *= 1 + a.parkBonus;
-  else if (apt.park === 'partial') marketMult *= 1 + a.parkPartial;
-  if (apt.bal > 0 && apt.bal < 10) marketMult *= 1 - a.smallBalconyPenalty;
-  if (apt.yard) marketMult *= 1 + a.yardBonus;
-  const design = getReview(apt)?.score;
-  if (design != null) marketMult *= 1 + a.designWeight * (design - 7.5);
-  const marketValue = a.marketPerM2 * (apt.area + a.marketBalconyCoef * apt.bal) * marketMult;
-
-  return { pricingArea, priceExVat, priceIncVat, discount, netPrice, idxFactor, totalCost, marketValue, profit: marketValue - totalCost };
-}
-
 function usePersistent(key, initial) {
-  const [val, setVal] = useState(() => {
-    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : initial; }
-    catch { return initial; }
+  const [value, setValue] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : initial;
+    } catch {
+      return initial;
+    }
   });
-  useEffect(() => { localStorage.setItem(key, JSON.stringify(val)); }, [key, val]);
-  return [val, setVal];
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
+  return [value, setValue];
 }
 
-const DIR_HE = { full: 'מלא', partial: 'חלקי', '': '' };
+function priorityGroup(rank) {
+  if (rank <= 10) return 'A';
+  if (rank <= 25) return 'B';
+  if (rank <= 50) return 'C';
+  return 'D';
+}
+
+function rankConfidence(row) {
+  const spread = row.worstRank - row.bestRank;
+  if (spread <= 1) return 'יציב מאוד';
+  if (spread <= 4) return 'יציב';
+  if (spread <= 8) return 'בינוני';
+  return 'רגיש להנחות';
+}
+
+function createRankMap(rows, key) {
+  return new Map(
+    [...rows]
+      .filter((row) => row.prog)
+      .sort((a, b) => b[key] - a[key])
+      .map((row, index) => [row.id, index + 1]),
+  );
+}
+
+function applyRanks(rows) {
+  const baseRanks = createRankMap(rows, 'profit');
+  const lowRanks = createRankMap(rows, 'lowProfit');
+  const highRanks = createRankMap(rows, 'highProfit');
+  rows.forEach((row) => {
+    if (!row.prog) return;
+    row.rank = baseRanks.get(row.id);
+    row.lowRank = lowRanks.get(row.id);
+    row.highRank = highRanks.get(row.id);
+    row.bestRank = Math.min(row.rank, row.lowRank, row.highRank);
+    row.worstRank = Math.max(row.rank, row.lowRank, row.highRank);
+    row.priority = priorityGroup(row.rank);
+    row.rankConfidence = rankConfidence(row);
+  });
+  return rows;
+}
 
 export default function App() {
-  const [assump, setAssump] = usePersistent('assumptions-v1', DEFAULTS);
+  const [assumptions, setAssumptions] = usePersistent('assumptions-v2', MARKET_DEFAULTS);
   const [taken, setTaken] = usePersistent('taken-v1', []);
   const [showAll, setShowAll] = useState(false);
   const [selectionMode, setSelectionMode] = usePersistent('selmode-v1', false);
-  const [filters, setFilters] = useState({ building: 0, rooms: 0, park: false, hideTaken: false });
+  const [filters, setFilters] = useState({ building: 0, rooms: 0, park: false, hideTaken: false, priority: '' });
   const [sort, setSort] = useState({ key: 'profit', dir: -1 });
   const [detail, setDetail] = useState(null);
-  const [showAssump, setShowAssump] = useState(true);
+  const [showAssumptions, setShowAssumptions] = useState(false);
 
-  const a = { ...DEFAULTS, ...assump };
+  const a = { ...MARKET_DEFAULTS, ...assumptions };
   const takenSet = useMemo(() => new Set(taken), [taken]);
 
+  const allRows = useMemo(() => {
+    const modeled = APARTMENTS.map((apt) => {
+      const id = `${apt.b}-${apt.apt}`;
+      const research = RESEARCH_BY_ID.get(id) ?? null;
+      return {
+        ...apt,
+        ...fullModel(apt, research, a),
+        research,
+        id,
+        planScore: research?.plan_score ?? null,
+        locationScore: research?.location_score ?? null,
+        qualityAdjustmentPct: research?.total_quality_adjustment_pct ?? 0,
+      };
+    });
+    return applyRanks(modeled);
+  }, [a]);
+
   const rows = useMemo(() => {
-    let list = APARTMENTS.filter((x) => showAll || x.prog).map((apt) => ({ ...apt, ...priceModel(apt, a), id: `${apt.b}-${apt.apt}`, design: getReview(apt)?.score ?? null }));
-    const progRanked = [...list].filter((r) => r.prog).sort((x, y) => y.profit - x.profit);
-    const rankMap = new Map(progRanked.map((r, i) => [r.id, i + 1]));
-    list.forEach((r) => { r.rank = rankMap.get(r.id) ?? null; });
-    if (filters.building) list = list.filter((r) => r.b === filters.building);
-    if (filters.rooms) list = list.filter((r) => Math.round(r.rooms) === filters.rooms);
-    if (filters.park) list = list.filter((r) => r.park);
-    if (filters.hideTaken) list = list.filter((r) => !takenSet.has(r.id));
+    let list = allRows.filter((row) => showAll || row.prog);
+    if (filters.building) list = list.filter((row) => row.b === filters.building);
+    if (filters.rooms) list = list.filter((row) => Math.round(row.rooms) === filters.rooms);
+    if (filters.park) list = list.filter((row) => row.park);
+    if (filters.priority) list = list.filter((row) => row.priority === filters.priority);
+    if (filters.hideTaken) list = list.filter((row) => !takenSet.has(row.id));
     list.sort((x, y) => {
-      const k = sort.key;
-      const xv = x[k] ?? -Infinity, yv = y[k] ?? -Infinity;
+      const xv = x[sort.key] ?? -Infinity;
+      const yv = y[sort.key] ?? -Infinity;
       return (xv > yv ? 1 : xv < yv ? -1 : 0) * sort.dir;
     });
     return list;
-  }, [a, filters, sort, showAll, takenSet]);
+  }, [allRows, filters, showAll, sort, takenSet]);
 
   const bestRemaining = useMemo(
-    () => rows.filter((r) => r.prog && !takenSet.has(r.id)).sort((x, y) => y.profit - x.profit)[0],
-    [rows, takenSet]
+    () => allRows
+      .filter((row) => row.prog && !takenSet.has(row.id))
+      .sort((x, y) => y.profit - x.profit)[0],
+    [allRows, takenSet],
   );
 
-  const toggleTaken = (id) =>
-    setTaken((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
+  const topThree = useMemo(
+    () => allRows.filter((row) => row.prog).sort((x, y) => y.profit - x.profit).slice(0, 3),
+    [allRows],
+  );
+
+  const toggleTaken = (id) => setTaken((current) => (
+    current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+  ));
 
   const th = (key, label) => (
-    <th onClick={() => setSort((s) => ({ key, dir: s.key === key ? -s.dir : -1 }))}
-        className={sort.key === key ? 'sorted' : ''}>
+    <th
+      onClick={() => setSort((current) => ({ key, dir: current.key === key ? -current.dir : -1 }))}
+      className={sort.key === key ? 'sorted' : ''}
+    >
       {label}{sort.key === key ? (sort.dir === -1 ? ' ▼' : ' ▲') : ''}
     </th>
   );
@@ -142,10 +166,9 @@ export default function App() {
     <div className="app">
       <header>
         <div>
-          <h1>אדרת בצמרת — סירקין 201</h1>
+          <h1>אדרת בצמרת — בחירת דירה לפי רווח צפוי</h1>
           <div className="sub">
-            מחיר מטרה · 84 דירות · מקומכם בבחירה: 60 ·
-            מסירה משוערת ~10/2029 · מכירה מותרת ~05/2030 (7 שנים מהזכייה)
+            84 דירות מחיר מטרה · מסירה משוערת 10/2029 · מכירה אפשרית משוערת 05/2030
           </div>
         </div>
         <div className="header-actions">
@@ -160,45 +183,75 @@ export default function App() {
         </div>
       </header>
 
+      <section className="model-banner">
+        <div>
+          <b>מודל בסיס:</b> שווי לפי סגמנט וגודל אפקטיבי, התאמת תכנון ומיקום, וצמיחה של {pct(a.baseGrowthAnnual)} לשנה עד {fmtDate(DEFAULT_SALE_DATE)}.
+        </div>
+        <div>
+          הכיול שמרני ונכון ל־{fmtFullDate(CALIBRATION_DATE)}. כל דירה מוצגת גם בטווח נמוך–גבוה.
+        </div>
+      </section>
+
+      <section className="top-cards">
+        {topThree.map((row) => (
+          <button key={row.id} className="top-card" onClick={() => setDetail(row)}>
+            <span className="top-rank">#{row.rank}</span>
+            <b>בניין {row.b}, דירה {row.apt}</b>
+            <span>{row.segment} · קומה {row.floor}</span>
+            <strong>{nis(row.profit)}</strong>
+            <small>{nis(row.lowProfit)}–{nis(row.highProfit)}</small>
+          </button>
+        ))}
+      </section>
+
       {selectionMode && (
         <div className="selection-bar">
           נלקחו: {taken.length} · נותרו: {84 - taken.length}
           {bestRemaining && (
-            <span> · הטובה ביותר שנותרה: <b>בניין {bestRemaining.b} דירה {bestRemaining.apt}</b> ({bestRemaining.type}, קומה {bestRemaining.floor}, רווח {nis(bestRemaining.profit)})</span>
+            <span>
+              · הטובה ביותר שנותרה: <b>בניין {bestRemaining.b}, דירה {bestRemaining.apt}</b>
+              {' '}— רווח בסיס {nis(bestRemaining.profit)}
+            </span>
           )}
           {taken.length > 0 && <button onClick={() => setTaken([])}>איפוס</button>}
         </div>
       )}
 
       <div className="layout">
-        <aside className={showAssump ? '' : 'collapsed'}>
-          <h2 onClick={() => setShowAssump(!showAssump)}>הנחות המודל {showAssump ? '▾' : '◂'}</h2>
-          {showAssump && (
+        <aside className={showAssumptions ? '' : 'collapsed'}>
+          <h2 onClick={() => setShowAssumptions(!showAssumptions)}>
+            הנחות המודל {showAssumptions ? '▾' : '◂'}
+          </h2>
+          {!showAssumptions && <div className="aside-summary">לחצו לפתיחת ההנחות והתרחישים</div>}
+          {showAssumptions && (
             <>
-              {Object.keys(LABELS).map((k) => (
-                <label key={k} className="assump">
-                  <span>{LABELS[k]}</span>
-                  <input
-                    type="number"
-                    step={PCT_KEYS.has(k) ? 0.1 : 100}
-                    value={PCT_KEYS.has(k) ? +(a[k] * 100).toFixed(2) : a[k]}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      if (Number.isNaN(v)) return;
-                      setAssump({ ...a, [k]: PCT_KEYS.has(k) ? v / 100 : v });
-                    }}
-                  />
-                  {PCT_KEYS.has(k) && <em>%</em>}
-                </label>
+              {ASSUMPTION_GROUPS.map((group) => (
+                <div className="assumption-group" key={group.title}>
+                  <h3>{group.title}</h3>
+                  {group.keys.map((key) => (
+                    <label key={key} className="assump">
+                      <span>{MARKET_LABELS[key]}</span>
+                      <input
+                        type="number"
+                        step={PERCENT_KEYS.has(key) ? 0.1 : 100}
+                        value={PERCENT_KEYS.has(key) ? +(a[key] * 100).toFixed(2) : a[key]}
+                        onChange={(e) => {
+                          const value = Number.parseFloat(e.target.value);
+                          if (Number.isNaN(value)) return;
+                          setAssumptions({ ...a, [key]: PERCENT_KEYS.has(key) ? value / 100 : value });
+                        }}
+                      />
+                      {PERCENT_KEYS.has(key) && <em>%</em>}
+                    </label>
+                  ))}
+                </div>
               ))}
-              <button className="reset" onClick={() => setAssump(DEFAULTS)}>אפס לברירת מחדל</button>
+              <button className="reset" onClick={() => setAssumptions(MARKET_DEFAULTS)}>איפוס לברירת המחדל</button>
               <div className="note">
-                מקדם ההצמדה למדד לפי לוח התשלומים (7% / 13% / 8×10%):
-                ×{indexFactor(a).toFixed(4)}
+                לפי ברירת המחדל, 20% הראשונים אינם צמודים ורק {pct(a.indexedShareAfterFirst20, 0)} מכל תשלום מאוחר יותר צמוד למדד.
               </div>
               <div className="note warn">
-                לאימות מול החוזה: מקדם המרפסת בתמחור, צד הפארק (מזרח, בניינים 2-3),
-                ומחיר השוק למ"ר.
+                פרמיות החצר זמניות עד לקבלת תשריט הצמדות ושטח חצר חוזי. חניה, מחסן, מימון ומסי מכירה עדיין אינם נכללים.
               </div>
             </>
           )}
@@ -217,7 +270,14 @@ export default function App() {
               <option value={3}>3 חדרים</option>
               <option value={4}>4 חדרים</option>
             </select>
-            <label className="toggle"><input type="checkbox" checked={filters.park} onChange={(e) => setFilters({ ...filters, park: e.target.checked })} /> רק פונות לפארק</label>
+            <select value={filters.priority} onChange={(e) => setFilters({ ...filters, priority: e.target.value })}>
+              <option value="">כל קבוצות העדיפות</option>
+              <option value="A">A — 10 המובילות</option>
+              <option value="B">B — מקומות 11–25</option>
+              <option value="C">C — מקומות 26–50</option>
+              <option value="D">D — יתר הדירות</option>
+            </select>
+            <label className="toggle"><input type="checkbox" checked={filters.park} onChange={(e) => setFilters({ ...filters, park: e.target.checked })} /> רק פארק</label>
             {selectionMode && <label className="toggle"><input type="checkbox" checked={filters.hideTaken} onChange={(e) => setFilters({ ...filters, hideTaken: e.target.checked })} /> הסתר שנלקחו</label>}
             <span className="count">{rows.length} דירות</span>
           </div>
@@ -227,6 +287,7 @@ export default function App() {
               <tr>
                 {selectionMode && <th>נלקחה</th>}
                 {th('rank', 'דירוג')}
+                {th('priority', 'קבוצה')}
                 {th('b', 'בניין')}
                 {th('apt', 'דירה')}
                 {th('floor', 'קומה')}
@@ -236,36 +297,45 @@ export default function App() {
                 {th('bal', 'מרפסת')}
                 <th>כיוונים</th>
                 <th>פארק</th>
-                {th('totalCost', 'עלות כוללת')}
-                {th('marketValue', 'שווי שוק')}
-                {th('profit', 'רווח')}
-                {th('design', 'תכנון')}
+                {th('totalCost', 'עלות')}
+                {th('marketValue', 'שווי 05/30')}
+                {th('profit', 'רווח בסיס')}
+                <th>טווח רווח</th>
+                {th('qualityAdjustmentPct', 'התאמת איכות')}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}
-                    className={[takenSet.has(r.id) ? 'taken' : '', r.prog ? '' : 'free-market', bestRemaining?.id === r.id && selectionMode ? 'best' : ''].join(' ')}
-                    onClick={() => setDetail(r)}>
+              {rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className={[
+                    takenSet.has(row.id) ? 'taken' : '',
+                    row.prog ? '' : 'free-market',
+                    bestRemaining?.id === row.id && selectionMode ? 'best' : '',
+                  ].join(' ')}
+                  onClick={() => setDetail(row)}
+                >
                   {selectionMode && (
-                    <td onClick={(e) => { e.stopPropagation(); toggleTaken(r.id); }}>
-                      <input type="checkbox" readOnly checked={takenSet.has(r.id)} />
+                    <td onClick={(e) => { e.stopPropagation(); toggleTaken(row.id); }}>
+                      <input type="checkbox" readOnly checked={takenSet.has(row.id)} />
                     </td>
                   )}
-                  <td>{r.rank ?? '—'}</td>
-                  <td>{r.b}</td>
-                  <td><b>{r.apt}</b></td>
-                  <td>{r.floor === 0 ? 'קרקע' : r.floor}</td>
-                  <td>{r.type}</td>
-                  <td>{Math.round(r.rooms)}</td>
-                  <td>{r.area.toFixed(1)}</td>
-                  <td>{r.bal ? r.bal.toFixed(1) + (r.nBal > 1 ? ` (×${r.nBal})` : '') : r.yard ? 'חצר' : '—'}</td>
-                  <td>{r.dir}</td>
-                  <td>{DIR_HE[r.park]}</td>
-                  <td>{r.prog ? nis(r.totalCost) : '—'}</td>
-                  <td>{nis(r.marketValue)}</td>
-                  <td className={r.prog ? 'profit' : ''}>{r.prog ? nis(r.profit) : '—'}</td>
-                  <td className='design'>{r.design ?? '—'}</td>
+                  <td>{row.rank ?? '—'}</td>
+                  <td>{row.priority ? <span className={`priority priority-${row.priority}`}>{row.priority}</span> : '—'}</td>
+                  <td>{row.b}</td>
+                  <td><b>{row.apt}</b></td>
+                  <td>{row.floor === 0 ? 'קרקע' : row.floor}</td>
+                  <td>{row.type}</td>
+                  <td>{Math.round(row.rooms)}</td>
+                  <td>{row.area.toFixed(1)}</td>
+                  <td>{row.bal ? `${row.bal.toFixed(1)}${row.nBal > 1 ? ` (×${row.nBal})` : ''}` : row.yard ? 'חצר' : '—'}</td>
+                  <td>{row.dir}</td>
+                  <td>{DIR_HE[row.park]}</td>
+                  <td>{row.prog ? nis(row.totalCost) : '—'}</td>
+                  <td>{nis(row.marketValue)}</td>
+                  <td className={row.prog ? 'profit' : ''}>{row.prog ? nis(row.profit) : '—'}</td>
+                  <td className="range">{row.prog ? `${nis(row.lowProfit)}–${nis(row.highProfit)}` : '—'}</td>
+                  <td className="quality">{row.research ? `${row.qualityAdjustmentPct > 0 ? '+' : ''}${row.qualityAdjustmentPct.toFixed(1)}%` : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -275,95 +345,105 @@ export default function App() {
 
       {detail && (
         <Detail
-          apt={rows.find((r) => r.id === detail.id) ?? detail}
+          apt={rows.find((row) => row.id === detail.id) ?? detail}
           rows={rows}
-          a={a}
+          assumptions={a}
           onClose={() => setDetail(null)}
           onNavigate={setDetail}
         />
       )}
 
       <footer>
-        הנתונים חולצו אוטומטית מתכניות המכר (DWFX). מחירי השוק והמדד הם הערכות —
-        עדכנו את ההנחות. אין לראות בכך ייעוץ השקעות.
+        המודל הוא כלי החלטה ולא שומת מקרקעין חתומה. שווי השוק מבוסס על כיול שמרני לעסקאות ופרויקטים חדשים בפתח תקווה ביולי 2026 ועל תרחישים עד מאי 2030. הרווח המוצג הוא גולמי ואינו כולל מימון, תיווך, עו״ד או מס.
       </footer>
     </div>
   );
 }
 
-function Detail({ apt, rows, a, onClose, onNavigate }) {
-  const idx = rows.findIndex((r) => r.id === apt.id);
-  const prev = idx > 0 ? rows[idx - 1] : null;
-  const next = idx >= 0 && idx < rows.length - 1 ? rows[idx + 1] : null;
+function Detail({ apt, rows, assumptions, onClose, onNavigate }) {
+  const index = rows.findIndex((row) => row.id === apt.id);
+  const previous = index > 0 ? rows[index - 1] : null;
+  const next = index >= 0 && index < rows.length - 1 ? rows[index + 1] : null;
 
   useEffect(() => {
-    const onKey = (e) => {
-      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-      if (e.key === 'ArrowUp' && prev) { e.preventDefault(); onNavigate(prev); }
-      else if (e.key === 'ArrowDown' && next) { e.preventDefault(); onNavigate(next); }
+    const onKey = (event) => {
+      if (['INPUT', 'TEXTAREA'].includes(event.target.tagName)) return;
+      if (event.key === 'ArrowUp' && previous) { event.preventDefault(); onNavigate(previous); }
+      if (event.key === 'ArrowDown' && next) { event.preventDefault(); onNavigate(next); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [prev, next, onNavigate]);
+  }, [previous, next, onNavigate]);
 
-  const m = priceModel(apt, a);
-  let paid = 0;
-  const sched = SCHEDULE.map((p) => {
-    const date = addMonths(SIGN_DATE, p.months);
-    const nominal = m.netPrice * p.pct;
-    const indexed = nominal * Math.pow(1 + a.indexAnnual, p.months / 12);
-    paid += indexed;
-    return { date, pct: p.pct, nominal, indexed, cum: paid };
-  });
+  const research = apt.research;
   return (
     <div className="overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
         <button className="close" onClick={onClose}>✕</button>
         <div className="drawer-nav">
-          <button disabled={!prev} onClick={() => prev && onNavigate(prev)}>▲ הקודמת</button>
-          <span className="drawer-nav-pos">{idx + 1} מתוך {rows.length}</span>
+          <button disabled={!previous} onClick={() => previous && onNavigate(previous)}>▲ הקודמת</button>
+          <span className="drawer-nav-pos">{index + 1} מתוך {rows.length}</span>
           <button disabled={!next} onClick={() => next && onNavigate(next)}>הבאה ▼</button>
         </div>
-        <h2>בניין {apt.b} · דירה {apt.apt} {apt.prog ? '· מחיר מטרה' : '· שוק חופשי'}</h2>
+
+        <div className="detail-title">
+          <div>
+            <h2>בניין {apt.b} · דירה {apt.apt}</h2>
+            <div className="detail-sub">{apt.segment} · טיפוס {apt.type} · קומה {apt.floor === 0 ? 'קרקע' : apt.floor}</div>
+          </div>
+          {apt.priority && <span className={`priority priority-${apt.priority} priority-large`}>{apt.priority}</span>}
+        </div>
+
         <div className="grid">
-          <div><span>קומה</span><b>{apt.floor === 0 ? 'קרקע' : apt.floor}</b></div>
-          <div><span>טיפוס</span><b>{apt.type}</b></div>
-          <div><span>חדרים</span><b>{Math.round(apt.rooms)}</b></div>
-          <div><span>שטח דירה</span><b>{apt.area.toFixed(2)} מ"ר</b></div>
-          <div><span>מרפסת שמש</span><b>{apt.bal ? `${apt.bal.toFixed(2)} מ"ר${apt.nBal > 1 ? ` (${apt.nBal} מרפסות)` : ''}` : apt.yard ? 'חצר פרטית' : '—'}</b></div>
-          <div><span>כיווני אוויר</span><b>{apt.dir}</b></div>
-          <div><span>נוף לפארק</span><b>{DIR_HE[apt.park] || 'לא'}</b></div>
-          {apt.cap && <div><span>תקרת מחיר מטרה</span><b>עד {apt.cap} מ"ר</b></div>}
+          <div><span>דירוג רווח</span><b>#{apt.rank ?? '—'}</b></div>
+          <div><span>יציבות דירוג</span><b>{apt.rankConfidence ?? '—'}</b></div>
+          <div><span>טווח דירוג בתרחישים</span><b>{apt.bestRank ?? '—'}–{apt.worstRank ?? '—'}</b></div>
+          <div><span>שטח דירה</span><b>{apt.area.toFixed(2)} מ״ר</b></div>
+          <div><span>מרפסת/חצר</span><b>{apt.bal ? `${apt.bal.toFixed(2)} מ״ר` : apt.yard ? 'חצר פרטית' : '—'}</b></div>
+          <div><span>כיוונים</span><b>{apt.dir}</b></div>
+          <div><span>נוף לפארק</span><b>{DIR_HE[apt.park]}</b></div>
+          {research && <div><span>ציון תכנון</span><b>{research.plan_score}/100</b></div>}
+          {research && <div><span>ציון מיקום</span><b>{research.location_score.toFixed(1)}/100</b></div>}
+          {research && <div><span>התאמת איכות</span><b>{research.total_quality_adjustment_pct > 0 ? '+' : ''}{research.total_quality_adjustment_pct.toFixed(2)}%</b></div>}
         </div>
 
         {apt.prog && (
           <>
-            <h3>תחשיב מחיר</h3>
-            <table className="mini">
+            <h3>שווי ורווח</h3>
+            <table className="mini valuation-table">
               <tbody>
-                <tr><td>שטח לתמחור ({apt.area.toFixed(1)} + {(a.balconyCoef * 100).toFixed(0)}%×{apt.bal.toFixed(1)})</td><td>{m.pricingArea.toFixed(2)} מ"ר</td></tr>
-                <tr><td>מחיר לפני מע"מ</td><td>{nis(m.priceExVat)}</td></tr>
-                <tr><td>מחיר כולל מע"מ ({(a.vat * 100).toFixed(0)}%)</td><td>{nis(m.priceIncVat)}</td></tr>
-                <tr><td>הנחה (מינ׳ {(a.discountRate * 100).toFixed(0)}% / {nis(a.discountCap)})</td><td>-{nis(m.discount)}</td></tr>
-                <tr className="hl"><td>מחיר חוזי נטו</td><td>{nis(m.netPrice)}</td></tr>
-                <tr><td>תוספת הצמדה למדד (×{m.idxFactor.toFixed(4)})</td><td>+{nis(m.totalCost - m.netPrice)}</td></tr>
-                <tr className="hl"><td>עלות כוללת משוערת</td><td>{nis(m.totalCost)}</td></tr>
-                <tr><td>שווי שוק משוער</td><td>{nis(m.marketValue)}</td></tr>
-                <tr className="hl profit"><td>רווח גולמי משוער</td><td>{nis(m.profit)}</td></tr>
+                <tr><td>שטח שוק אפקטיבי</td><td>{apt.effectiveMarketArea.toFixed(2)} מ״ר</td></tr>
+                <tr><td>מחיר כיול בסגמנט כיום</td><td>{nis(apt.currentRate)} למ״ר אפקטיבי</td></tr>
+                <tr><td>שווי לפני התאמת איכות כיום</td><td>{nis(apt.currentUnadjustedValue)}</td></tr>
+                <tr><td>התאמת תכנון ומיקום</td><td>{apt.qualityAdjustment > 0 ? '+' : ''}{pct(apt.qualityAdjustment, 2)}</td></tr>
+                <tr><td>שווי משוער כיום</td><td>{nis(apt.currentMarketValue)}</td></tr>
+                <tr><td>תרחיש בסיס עד 05/2030</td><td>{pct(assumptions.baseGrowthAnnual)} לשנה</td></tr>
+                <tr className="hl"><td>שווי מכירה משוער — בסיס</td><td>{nis(apt.marketValue)}</td></tr>
+                <tr><td>טווח שווי נמוך–גבוה</td><td>{nis(apt.lowMarketValue)}–{nis(apt.highMarketValue)}</td></tr>
+                <tr><td>מחיר חוזי נטו</td><td>{nis(apt.netPrice)}</td></tr>
+                <tr><td>תוספת מדד משוערת</td><td>+{nis(apt.indexAddition)}</td></tr>
+                <tr className="hl"><td>עלות רכישה כוללת</td><td>{nis(apt.totalCost)}</td></tr>
+                <tr className="hl profit"><td>רווח גולמי משוער — בסיס</td><td>{nis(apt.profit)}</td></tr>
+                <tr><td>טווח רווח</td><td>{nis(apt.lowProfit)}–{nis(apt.highProfit)}</td></tr>
+                <tr><td>תשואה על העלות</td><td>{pct(apt.roi)}</td></tr>
               </tbody>
             </table>
 
-            <h3>לוח תשלומים (חתימה 01/09/2026, מדד {(a.indexAnnual * 100).toFixed(1)}% שנתי)</h3>
+            <h3>לוח תשלומים ומדד</h3>
+            <div className="note">
+              20% הראשונים אינם מוצמדים. לאחר מכן רק החלק שהוגדר בהנחות מוצמד למדד; ברירת המחדל היא 50% מכל תשלום.
+            </div>
             <table className="mini">
-              <thead><tr><th>מועד</th><th>%</th><th>נומינלי</th><th>צמוד מדד</th><th>מצטבר</th></tr></thead>
+              <thead><tr><th>מועד</th><th>%</th><th>נומינלי</th><th>חלק צמוד</th><th>צפוי בפועל</th><th>מצטבר</th></tr></thead>
               <tbody>
-                {sched.map((p, i) => (
-                  <tr key={i}>
-                    <td>{fmtDate(p.date)}</td>
-                    <td>{(p.pct * 100).toFixed(0)}%</td>
-                    <td>{nis(p.nominal)}</td>
-                    <td>{nis(p.indexed)}</td>
-                    <td>{nis(p.cum)}</td>
+                {apt.payments.map((payment, paymentIndex) => (
+                  <tr key={paymentIndex}>
+                    <td>{fmtDate(payment.date)}</td>
+                    <td>{pct(payment.pct, 0)}</td>
+                    <td>{nis(payment.nominal)}</td>
+                    <td>{pct(payment.indexedShare, 0)}</td>
+                    <td>{nis(payment.actual)}</td>
+                    <td>{nis(payment.cumulative)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -371,11 +451,69 @@ function Detail({ apt, rows, a, onClose, onNavigate }) {
           </>
         )}
 
-        <Review apt={apt} />
-        <h3>תכנית הדירה</h3>
+        {research && <DeepResearch research={research} />}
+
+        <h3>תוכנית הדירה</h3>
         <PlanImage apt={apt} />
-        <div className="note">מקור: תכניות המכר (DWFX) · לחיצה מגדילה · בקומות 2-3 מוצגת תכנית הקומה הטיפוסית המשותפת</div>
+        <div className="note">מקור: תוכניות המכר (DWFX) · לחיצה מגדילה · יש לאמת מידות והצמדות מול תוכנית המכר החתומה.</div>
       </div>
+    </div>
+  );
+}
+
+function TextList({ value, className = '' }) {
+  if (!value) return <div>—</div>;
+  const items = value.split('|').map((item) => item.trim()).filter(Boolean);
+  if (items.length <= 1) return <div className={className}>{value}</div>;
+  return <ul className={className}>{items.map((item, index) => <li key={index}>{item}</li>)}</ul>;
+}
+
+function DeepResearch({ research }) {
+  return (
+    <section className="deep-review">
+      <h3>ניתוח שמאי־תכנוני</h3>
+      <p className="review-summary">{research.plan_summary}</p>
+      <div className="research-score-grid">
+        <div><span>חלל ציבורי</span><b>{research.public_space_score}</b></div>
+        <div><span>חדרי שינה</span><b>{research.bedrooms_score}</b></div>
+        <div><span>יעילות שטח</span><b>{research.efficiency_score}</b></div>
+        <div><span>רחצה ושירות</span><b>{research.service_score}</b></div>
+        <div><span>גמישות</span><b>{research.flexibility_score}</b></div>
+      </div>
+
+      <ReviewBlock title="מידות מרכזיות" text={research.dimensions} />
+      <ReviewBlock title="סלון, מטבח ופינת אוכל" text={research.public_notes} />
+      <ReviewBlock title="חדרי שינה ואזור פרטי" text={research.bedroom_notes} />
+      <ReviewBlock title="תנועה וניצול שטח" text={research.circulation_notes} />
+      <ReviewBlock title="רחצה, שירות וכביסה" text={research.service_notes} />
+      <ReviewBlock title="מרפסת או חצר" text={research.outdoor_notes} />
+      <ReviewBlock title="כיוון ואור" text={research.orientation_note} />
+      <ReviewBlock title="קומה ופרטיות" text={research.floor_note} />
+      <ReviewBlock title="מיקרו־מיקום" text={research.micro_location_note} />
+
+      <div className="rv-cols">
+        <div>
+          <b>חוזקות היחידה</b>
+          <TextList value={research.unit_strengths} />
+        </div>
+        <div>
+          <b>סיכונים וחסרונות</b>
+          <TextList value={research.unit_risks} className="cons" />
+        </div>
+      </div>
+      <div className="verification-box">
+        <b>מה חייבים לאמת לפני הבחירה</b>
+        <TextList value={research.verification_needed} />
+      </div>
+    </section>
+  );
+}
+
+function ReviewBlock({ title, text }) {
+  return (
+    <div className="review-block">
+      <b>{title}</b>
+      <p>{text || '—'}</p>
     </div>
   );
 }
@@ -385,50 +523,27 @@ function PlanImage({ apt }) {
   const src = `${import.meta.env.BASE_URL}plans/apt_b${apt.b}_${apt.apt}.png`;
 
   useEffect(() => {
-    if (!zoomed) return;
-    const onKey = (e) => { if (e.key === 'Escape') setZoomed(false); };
+    if (!zoomed) return undefined;
+    const onKey = (event) => { if (event.key === 'Escape') setZoomed(false); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [zoomed]);
 
   return (
     <>
-      <img className="plan-img" src={src}
-           alt={`תכנית דירה ${apt.apt} בניין ${apt.b}`}
-           onClick={() => setZoomed(true)}
-           onError={(e) => { e.target.style.display = 'none'; }} />
+      <img
+        className="plan-img"
+        src={src}
+        alt={`תוכנית דירה ${apt.apt} בניין ${apt.b}`}
+        onClick={() => setZoomed(true)}
+        onError={(event) => { event.currentTarget.style.display = 'none'; }}
+      />
       {zoomed && (
         <div className="plan-lightbox" onClick={() => setZoomed(false)}>
           <button className="close" onClick={() => setZoomed(false)}>✕</button>
-          <img src={src} alt={`תכנית דירה ${apt.apt} בניין ${apt.b}`}
-               onClick={(e) => e.stopPropagation()} />
+          <img src={src} alt={`תוכנית דירה ${apt.apt} בניין ${apt.b}`} onClick={(e) => e.stopPropagation()} />
         </div>
       )}
     </>
-  );
-}
-
-function Review({ apt }) {
-  const rv = getReview(apt);
-  if (!rv) return null;
-  const notes = floorNote(apt);
-  return (
-    <div className="review">
-      <h3>ביקורת תכנון <span className="score">{rv.score}/10</span></h3>
-      <div className="rv-cols">
-        <div>
-          <b>יתרונות</b>
-          <ul>{rv.pros.map((p, i) => <li key={i}>{p}</li>)}</ul>
-        </div>
-        <div>
-          <b>חסרונות</b>
-          <ul className="cons">{rv.cons.map((c, i) => <li key={i}>{c}</li>)}</ul>
-        </div>
-      </div>
-      <div className="rv-bottom">{rv.bottom}</div>
-      {notes.length > 0 && (
-        <div className="rv-notes">{notes.map((n, i) => <div key={i}>• {n}</div>)}</div>
-      )}
-    </div>
   );
 }
