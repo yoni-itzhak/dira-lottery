@@ -19,9 +19,14 @@ jobs:
           cp -R app/public/plans analysis_bundle/plans
           cp app/src/data.js analysis_bundle/data.js
           cp app/src/reviews.js analysis_bundle/reviews.js
-          if [ -f data/apartments_full.csv ]; then cp data/apartments_full.csv analysis_bundle/; fi
-          if [ -f app/data/apartments_full.csv ]; then cp app/data/apartments_full.csv analysis_bundle/; fi
-          find analysis_bundle -maxdepth 2 -type f | sort > analysis_bundle/manifest.txt
+          find . -type f \
+            \( -iname '*.pdf' -o -iname '*.dwfx' -o -iname '*.csv' -o -iname '*.json' -o -iname '*.txt' -o -iname '*.py' \) \
+            -not -path './.git/*' -not -path './app/node_modules/*' -print0 | while IFS= read -r -d '' f; do
+              mkdir -p "analysis_bundle/source/$(dirname "$f")"
+              cp "$f" "analysis_bundle/source/$f"
+            done
+          find . -maxdepth 5 -type f -not -path './.git/*' | sort > analysis_bundle/repository_manifest.txt
+          find analysis_bundle -type f | sort > analysis_bundle/manifest.txt
       - name: Upload analysis bundle
         uses: actions/upload-artifact@v4
         with:
