@@ -1,0 +1,30 @@
+name: Export plan analysis bundle
+
+on:
+  pull_request:
+    branches:
+      - claude/session-dcup8f
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build analysis bundle
+        run: |
+          mkdir -p analysis_bundle
+          cp -R app/public/plans analysis_bundle/plans
+          cp app/src/data.js analysis_bundle/data.js
+          cp app/src/reviews.js analysis_bundle/reviews.js
+          if [ -f data/apartments_full.csv ]; then cp data/apartments_full.csv analysis_bundle/; fi
+          if [ -f app/data/apartments_full.csv ]; then cp app/data/apartments_full.csv analysis_bundle/; fi
+          find analysis_bundle -maxdepth 2 -type f | sort > analysis_bundle/manifest.txt
+      - name: Upload analysis bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: apartment-plan-analysis-bundle
+          path: analysis_bundle
+          retention-days: 3
