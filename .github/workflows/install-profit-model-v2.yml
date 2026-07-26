@@ -28,7 +28,7 @@ jobs:
             .profit_model_payload/chunk-03 \
             .profit_model_payload/chunk-04x-* \
             .profit_model_payload/chunk-05 \
-            .profit_model_payload/chunk-06 \
+            .profit_model_payload/chunk-06x-* \
             > assembled-profit-model.b64
           sha256sum assembled-profit-model.b64 > assembled-profit-model.sha256
       - uses: actions/upload-artifact@v4
@@ -41,7 +41,7 @@ jobs:
       - name: Decode and verify payload
         run: |
           base64 -d assembled-profit-model.b64 > /tmp/profit-model.tar.gz
-          sha256sum /tmp/profit-model.tar.gz
+          echo 'de623e2cdac24dd0114ee15d04456f4b0af27a75cdefc1293fb62e94378040f2  /tmp/profit-model.tar.gz' | sha256sum -c -
           tar -tzf /tmp/profit-model.tar.gz > /tmp/profit-model-manifest.txt
           test -s /tmp/profit-model-manifest.txt
       - name: Install model
