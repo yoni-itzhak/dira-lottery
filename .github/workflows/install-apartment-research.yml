@@ -1,0 +1,31 @@
+name: Install apartment research
+
+on:
+  push:
+    branches:
+      - analysis/apartment-research-v1
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    if: ${{ !contains(github.event.head_commit.message, '[research installed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: analysis/apartment-research-v1
+      - name: Decode and install research
+        run: |
+          cat .research_payload/xz-* | base64 -d > /tmp/research.tar.xz
+          tar -xJf /tmp/research.tar.xz -C .
+          rm -rf .research_payload
+          rm -f .github/workflows/install-apartment-research.yml
+      - name: Commit research files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add deep apartment research [research installed]"
+          git push origin HEAD:analysis/apartment-research-v1
