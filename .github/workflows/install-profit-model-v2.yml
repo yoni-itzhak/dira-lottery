@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/profit-model-v2
-      - name: Decode and verify payload
+      - name: Assemble payload
         run: |
           cat \
             .profit_model_payload/chunk-00 \
@@ -29,9 +29,18 @@ jobs:
             .profit_model_payload/chunk-04x-* \
             .profit_model_payload/chunk-05 \
             .profit_model_payload/chunk-06 \
-            > /tmp/profit-model.b64
-          sha256sum /tmp/profit-model.b64
-          base64 -d /tmp/profit-model.b64 > /tmp/profit-model.tar.gz
+            > assembled-profit-model.b64
+          sha256sum assembled-profit-model.b64 > assembled-profit-model.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assembled-profit-model
+          path: |
+            assembled-profit-model.b64
+            assembled-profit-model.sha256
+          retention-days: 1
+      - name: Decode and verify payload
+        run: |
+          base64 -d assembled-profit-model.b64 > /tmp/profit-model.tar.gz
           sha256sum /tmp/profit-model.tar.gz
           tar -tzf /tmp/profit-model.tar.gz > /tmp/profit-model-manifest.txt
           test -s /tmp/profit-model-manifest.txt
