@@ -4,13 +4,16 @@ on:
   push:
     branches:
       - feature/profit-model-v2
+  pull_request:
+    branches:
+      - claude/session-dcup8f
 
 permissions:
   contents: write
 
 jobs:
   install:
-    if: ${{ !contains(github.event.head_commit.message, '[profit model installed]') }}
+    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[profit model installed]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
