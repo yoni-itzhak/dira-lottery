@@ -15,9 +15,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: analysis/apartment-research-v1
+      - name: Verify xz-00
+        run: echo '283559ad4154913760ae9b616819068ed9dfb8f9c806469527454010075c182b  .research_payload/xz-00' | sha256sum -c -
+      - name: Verify xz-01
+        run: echo '6ce4860656ed7c50caf3d59c5036e1e513cb3890306b121a028547aa85748f39  .research_payload/xz-01' | sha256sum -c -
+      - name: Verify xz-02
+        run: echo '02add8feb967ab2012392dbaf7e0a04afc170b09ce56fa29d04596add4fb0067  .research_payload/xz-02' | sha256sum -c -
+      - name: Verify xz-03
+        run: echo '0ea94ee0252423d6c04a485b1707cac165e2e7bf80d17789501050aa73d7647d  .research_payload/xz-03' | sha256sum -c -
+      - name: Verify xz-04
+        run: echo '3f4bd12411902b23566d0306a75f7d287c2c4d3ae22675020d08357e68221fdb  .research_payload/xz-04' | sha256sum -c -
+      - name: Verify combined payload
+        run: |
+          cat .research_payload/xz-* > /tmp/research.b64
+          echo '7db47760464bfb637b678a591ca97b2cc8be7a40481e005dbb880c778c5afede  /tmp/research.b64' | sha256sum -c -
       - name: Decode and install research
         run: |
-          cat .research_payload/xz-* | base64 -d > /tmp/research.tar.xz
+          base64 -d /tmp/research.b64 > /tmp/research.tar.xz
+          echo '53fc2b6c41db4385826b02849c6fa967dde75b0d9d421a3b1424bc5bac737faf  /tmp/research.tar.xz' | sha256sum -c -
           tar -xJf /tmp/research.tar.xz -C .
           rm -rf .research_payload
           rm -f .github/workflows/install-apartment-research.yml
