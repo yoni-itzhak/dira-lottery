@@ -16,6 +16,7 @@ const RESEARCH_BY_ID = new Map(RESEARCH.units.map((unit) => [unit.apartment_id, 
 const DIR_HE = { full: 'מלא', partial: 'חלקי', '': 'לא' };
 const fmtDate = (date) => date.toLocaleDateString('he-IL', { month: '2-digit', year: 'numeric' });
 const fmtFullDate = (date) => date.toLocaleDateString('he-IL');
+const PROFIT_TIE_BAND_ILS = 25000;
 
 const ASSUMPTION_GROUPS = [
   {
@@ -66,13 +67,37 @@ function rankConfidence(row) {
   return 'רגיש להנחות';
 }
 
+function compareQuality(a, b, key) {
+  const qualityDiff = (b.qualityAdjustmentPct ?? 0) - (a.qualityAdjustmentPct ?? 0);
+  if (qualityDiff !== 0) return qualityDiff;
+  const locationDiff = (b.locationScore ?? 0) - (a.locationScore ?? 0);
+  if (locationDiff !== 0) return locationDiff;
+  const planDiff = (b.planScore ?? 0) - (a.planScore ?? 0);
+  if (planDiff !== 0) return planDiff;
+  return b[key] - a[key];
+}
+
 function createRankMap(rows, key) {
-  return new Map(
-    [...rows]
-      .filter((row) => row.prog)
-      .sort((a, b) => b[key] - a[key])
-      .map((row, index) => [row.id, index + 1]),
-  );
+  const profitSorted = [...rows]
+    .filter((row) => row.prog)
+    .sort((a, b) => b[key] - a[key]);
+  const ranked = [];
+
+  for (let index = 0; index < profitSorted.length;) {
+    const groupStartValue = profitSorted[index][key];
+    const group = [];
+    while (
+      index < profitSorted.length
+      && groupStartValue - profitSorted[index][key] <= PROFIT_TIE_BAND_ILS
+    ) {
+      group.push(profitSorted[index]);
+      index += 1;
+    }
+    group.sort((a, b) => compareQuality(a, b, key));
+    ranked.push(...group);
+  }
+
+  return new Map(ranked.map((row, index) => [row.id, index + 1]));
 }
 
 function applyRanks(rows) {
@@ -98,7 +123,7 @@ export default function App() {
   const [showAll, setShowAll] = useState(false);
   const [selectionMode, setSelectionMode] = usePersistent('selmode-v1', false);
   const [filters, setFilters] = useState({ building: 0, rooms: 0, park: false, hideTaken: false, priority: '' });
-  const [sort, setSort] = useState({ key: 'profit', dir: -1 });
+  const [sort, setSort] = useState({ key: 'rank', dir: 1 });
   const [detail, setDetail] = useState(null);
   const [showAssumptions, setShowAssumptions] = useState(false);
 
@@ -140,12 +165,12 @@ export default function App() {
   const bestRemaining = useMemo(
     () => allRows
       .filter((row) => row.prog && !takenSet.has(row.id))
-      .sort((x, y) => y.profit - x.profit)[0],
+      .sort((x, y) => x.rank - y.rank)[0],
     [allRows, takenSet],
   );
 
   const topThree = useMemo(
-    () => allRows.filter((row) => row.prog).sort((x, y) => y.profit - x.profit).slice(0, 3),
+    () => allRows.filter((row) => row.prog).sort((x, y) => x.rank - y.rank).slice(0, 3),
     [allRows],
   );
 
@@ -188,7 +213,7 @@ export default function App() {
           <b>מודל בסיס:</b> שווי לפי סגמנט וגודל אפקטיבי, התאמת תכנון ומיקום, וצמיחה של {pct(a.baseGrowthAnnual)} לשנה עד {fmtDate(DEFAULT_SALE_DATE)}.
         </div>
         <div>
-          הכיול שמרני ונכון ל־{fmtFullDate(CALIBRATION_DATE)}. כל דירה מוצגת גם בטווח נמוך–גבוה.
+          הכיול שמרני ונכון ל־{fmtFullDate(CALIBRATION_DATE)}. פער רווח של עד {nis(PROFIT_TIE_BAND_ILS)} נחשב לאותו טווח פיננסי, ובתוכו איכות הדירה שוברת את השוויון.
         </div>
       </section>
 
@@ -248,7 +273,7 @@ export default function App() {
               ))}
               <button className="reset" onClick={() => setAssumptions(MARKET_DEFAULTS)}>איפוס לברירת המחדל</button>
               <div className="note">
-                לפי ברירת המחדל, 20% הראשונים אינם צמודים ורק {pct(a.indexedShareAfterFirst20, 0)} מכל תשלום מאוחר יותר צמוד למדד.
+                לפי ברירת המחדל, 20% הראשונים אינם מוצמדים ורק {pct(a.indexedShareAfterFirst20, 0)} מכל תשלום מאוחר יותר צמוד למדד.
               </div>
               <div className="note warn">
                 פרמיות החצר זמניות עד לקבלת תשריט הצמדות ושטח חצר חוזי. חניה, מחסן, מימון ומסי מכירה עדיין אינם נכללים.
